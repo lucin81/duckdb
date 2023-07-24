@@ -7,14 +7,14 @@ module duckdb
   public :: duckdb_database
   public :: duckdb_connection
 
-  ! public ::  duckdb_prepared_statement
-  ! public :: duckdb_extracted_statements
+  public ::  duckdb_prepared_statement
+  public :: duckdb_extracted_statements
   ! public :: duckdb_pending_result
   public :: duckdb_appender
-  ! public :: duckdb_arrow
-  ! public :: duckdb_arrow_schema
-  ! public :: duckdb_config
-  ! public :: duckdb_arrow_array
+  public :: duckdb_arrow
+  public :: duckdb_arrow_schema
+  public :: duckdb_config
+  public :: duckdb_arrow_array
 
   public :: duckdb_logical_type
   public :: duckdb_data_chunk
@@ -75,14 +75,15 @@ module duckdb
   public :: duckdbsuccess
   public :: duckdberror
   public :: duckdb_open
+  public :: duckdb_open_ext
   public :: duckdb_close
   public :: duckdb_connect
   public :: duckdb_disconnect
 
   public :: duckdb_create_config
   public :: duckdb_config_count
-  ! public :: duckdb_get_config_flag
-  ! public :: duckdb_set_config
+  public :: duckdb_get_config_flag
+  public :: duckdb_set_config
   public :: duckdb_destroy_config
   public :: duckdb_query
   public :: duckdb_destroy_result
@@ -129,6 +130,7 @@ module duckdb
   public :: duckdb_double_to_hugeint
   public :: duckdb_decimal_to_double
   public :: duckdb_double_to_decimal
+  public :: duckdb_string_to_character
 
   public :: duckdb_prepare
   public :: duckdb_destroy_prepare
@@ -160,8 +162,12 @@ module duckdb
   ! public :: duckdb_bind_string ! helper function to wrap duckdb_bind_varchar_length
   ! public :: duckdb_bind_blob ! the way it should work
   public :: duckdb_bind_null
-  ! public :: duckdb_execute_prepared
+  public :: duckdb_execute_prepared
   ! public :: duckdb_execute_prepared_arrow
+  public :: duckdb_extract_statements
+  public :: duckdb_prepare_extracted_statement
+  public :: duckdb_extract_statements_error
+  public :: duckdb_destroy_extracted
 
   public :: duckdb_data_chunk_get_size
   public :: duckdb_data_chunk_get_vector
@@ -230,6 +236,12 @@ module duckdb
   public :: duckdb_append_blob
   public :: duckdb_append_null
   public :: duckdb_append_data_chunk
+
+  public :: duckdb_query_arrow
+  public :: duckdb_query_arrow_schema
+  public :: duckdb_query_arrow_array
+  public :: duckdb_query_arrow_error
+  public :: duckdb_destroy_arrow
 
   public :: STANDARD_VECTOR_SIZE
 
@@ -430,15 +442,22 @@ module duckdb
     ! =========================================================================
 
     ! DUCKDB_API duckdb_state duckdb_open(const char *path, duckdb_database *out_database);
-    function duckdb_open(path, out_database) bind(c, name='duckdb_open') result(res)
-      import :: duckdb_state, c_ptr, duckdb_database
+    function duckdb_open_(path, out_database) bind(c, name='duckdb_open') result(res)
+      import :: duckdb_state, c_char, duckdb_database
       integer(kind(duckdb_state)) :: res
-      type(c_ptr), value :: path
+      character(kind=c_char) :: path
       type(duckdb_database) :: out_database
-    end function duckdb_open
+    end function duckdb_open_
 
     ! DUCKDB_API duckdb_state duckdb_open_ext(const char *path, duckdb_database *out_database, duckdb_config config,char **out_error);
-    ! TODO
+    function duckdb_open_ext_(path, out_database, config, out_error) bind(c, name='duckdb_open_ext') result(res)
+      import :: duckdb_state, c_char, duckdb_database, duckdb_config, c_ptr
+      integer(kind(duckdb_state)) :: res
+      character(kind=c_char) :: path
+      type(duckdb_database) :: out_database
+      type(duckdb_config), value :: config
+      type(c_ptr) :: out_error
+    end function duckdb_open_ext_
 
     ! DUCKDB_API void duckdb_close(duckdb_database *database);
     subroutine duckdb_close(database) bind(c, name='duckdb_close')
@@ -485,8 +504,22 @@ module duckdb
     end function duckdb_config_count_
 
     ! DUCKDB_API duckdb_state duckdb_get_config_flag(size_t index, const char **out_name, const char **out_description);
+    function duckdb_get_config_flag_(index, out_name, out_description) bind(c, name='duckdb_get_config_flag') result(res)
+      import :: duckdb_state, c_size_t, c_ptr
+      integer(kind(duckdb_state)) :: res
+      integer(kind=c_size_t), value :: index
+      type(c_ptr) :: out_name
+      type(c_ptr) :: out_description
+    end function duckdb_get_config_flag_
 
     ! DUCKDB_API duckdb_state duckdb_set_config(duckdb_config config, const char *name, const char *option);
+    function duckdb_set_config_(config, name, option) bind(c, name='duckdb_set_config') result(res)
+      import :: duckdb_state, duckdb_config, c_char
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_config), value :: config
+      character(c_char) :: name
+      character(c_char) :: option
+    end function duckdb_set_config_
 
     ! DUCKDB_API void duckdb_destroy_config(duckdb_config *config);
     subroutine duckdb_destroy_config(config) bind(c, name='duckdb_destroy_config')
@@ -888,14 +921,14 @@ module duckdb
     ! DUCKDB_API const char *duckdb_prepare_error(duckdb_prepared_statement prepared_statement);
     function duckdb_prepare_error_(prepared_statement) bind(c, name='duckdb_prepare_error') result(ptr)
       import :: duckdb_prepared_statement, c_ptr
-      type(duckdb_prepared_statement) :: prepared_statement
+      type(duckdb_prepared_statement), value :: prepared_statement
       type(c_ptr) :: ptr
     end function duckdb_prepare_error_
 
-    ! DUCKDB_API idx_t duckdb_nparams(duckdb_prepared_statement prepared_statement);i
+    ! DUCKDB_API idx_t duckdb_nparams(duckdb_prepared_statement prepared_statement);
     function duckdb_nparams_(ps) bind(c, name='duckdb_nparams') result(n)
       import :: duckdb_prepared_statement, c_int64_t
-      type(duckdb_prepared_statement) :: ps
+      type(duckdb_prepared_statement), value :: ps
       integer(kind=c_int64_t) :: n
     end function duckdb_nparams_
 
@@ -904,7 +937,7 @@ module duckdb
       import :: duckdb_type, duckdb_prepared_statement, c_int64_t
       integer(kind(duckdb_type)) :: res
       type(duckdb_prepared_statement), value :: prepared_statement
-      integer(kind=c_int64_t) :: param_idx
+      integer(kind=c_int64_t), value :: param_idx
     end function duckdb_param_type_
 
     ! DUCKDB_API duckdb_state duckdb_clear_bindings(duckdb_prepared_statement prepared_statement);
@@ -1079,6 +1112,12 @@ module duckdb
     end function duckdb_bind_null_
 
     ! DUCKDB_API duckdb_state duckdb_execute_prepared(duckdb_prepared_statement prepared_statement, duckdb_result *out_result);
+    function duckdb_execute_prepared(prepared_statement, out_result) bind(c, name='duckdb_execute_prepared') result(res)
+      import :: duckdb_state, duckdb_prepared_statement, duckdb_result
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_prepared_statement), value :: prepared_statement
+      type(duckdb_result) :: out_result
+    end function duckdb_execute_prepared
 
     ! DUCKDB_API duckdb_state duckdb_execute_prepared_arrow(duckdb_prepared_statement prepared_statement, duckdb_arrow *out_result);
 
@@ -1089,12 +1128,38 @@ module duckdb
     ! TODO
 
     ! DUCKDB_API idx_t duckdb_extract_statements(duckdb_connection connection, const char *query, duckdb_extracted_statements *out_extracted_statements);
+    function duckdb_extract_statements_(connection, query, out_extracted_statements) &
+        bind(c, name='duckdb_extract_statements') result(res)
+      import :: duckdb_connection, c_char, duckdb_extracted_statements, c_int64_t
+      type(duckdb_connection), value :: connection
+      character(kind=c_char) :: query
+      type(duckdb_extracted_statements) :: out_extracted_statements
+      integer(kind=c_int64_t) :: res
+    end function duckdb_extract_statements_
 
     ! DUCKDB_API duckdb_state duckdb_prepare_extracted_statement(duckdb_connection connection, duckdb_extracted_statements extracted_statements, idx_t index, duckdb_prepared_statement *out_prepared_statement);
+    function duckdb_prepare_extracted_statement_(connection, extracted_statements, &
+        index, out_prepared_statement) bind(c, name='duckdb_prepare_extracted_statement') result(res)
+      import :: duckdb_connection, duckdb_prepared_statement, duckdb_extracted_statements, c_int64_t, duckdb_state
+      type(duckdb_connection), value :: connection
+      type(duckdb_extracted_statements), value :: extracted_statements
+      type(duckdb_prepared_statement) :: out_prepared_statement
+      integer(kind=c_int64_t), value :: index
+      integer(kind(duckdb_state)) :: res
+    end function duckdb_prepare_extracted_statement_
 
     ! DUCKDB_API const char *duckdb_extract_statements_error(duckdb_extracted_statements extracted_statements);
+    function duckdb_extract_statements_error_(extracted_statements) bind(c, name='duckdb_extract_statements_error') result(res)
+      import :: duckdb_extracted_statements, c_ptr
+      type(duckdb_extracted_statements), value :: extracted_statements
+      type(c_ptr) :: res
+    end function duckdb_extract_statements_error_
 
     ! DUCKDB_API void duckdb_destroy_extracted(duckdb_extracted_statements *extracted_statements);
+    subroutine duckdb_destroy_extracted(extracted_statements) bind(c, name='duckdb_destroy_extracted')
+      import :: duckdb_extracted_statements
+      type(duckdb_extracted_statements) :: extracted_statements
+    end subroutine duckdb_destroy_extracted
 
     ! =========================================================================
     ! Pending Result Interface
@@ -1360,12 +1425,19 @@ module duckdb
     !>    idx_t idx_in_entry = row_idx % 64;
     !>    bool is_valid = validity_mask[entry_idx] & (1 « idx_in_entry);
     !>  Alternatively, the (slower) duckdb_validity_row_is_valid function can be used.
-    function duckdb_vector_get_validity_(vector) bind(c, name='duckdb_vector_get_validity') result(res)
+    ! function duckdb_vector_get_validity_(vector) bind(c, name='duckdb_vector_get_validity') result(res)
+    !   import :: duckdb_vector, c_int64_t, c_ptr
+    !   type(duckdb_vector), value :: vector
+    !   type(c_ptr) :: res
+    !   ! integer(kind=c_int64_t) :: res
+    ! end function duckdb_vector_get_validity_
+
+    function duckdb_vector_get_validity(vector) bind(c, name='duckdb_vector_get_validity') result(res)
       import :: duckdb_vector, c_int64_t, c_ptr
       type(duckdb_vector), value :: vector
       type(c_ptr) :: res
       ! integer(kind=c_int64_t) :: res
-    end function duckdb_vector_get_validity_
+    end function duckdb_vector_get_validity
 
     ! DUCKDB_API void duckdb_vector_ensure_validity_writable(duckdb_vector vector);
     subroutine duckdb_vector_ensure_validity_writable(vector) bind(c, name='duckdb_vector_ensure_validity_writable')
@@ -1399,27 +1471,27 @@ module duckdb
     end function duckdb_list_vector_get_child
 
     ! DUCKDB_API idx_t duckdb_list_vector_get_size(duckdb_vector vector);
-    function duckdb_list_vector_get_size(vector) bind(c, name='duckdb_list_vector_get_size') result(res)
+    function duckdb_list_vector_get_size_(vector) bind(c, name='duckdb_list_vector_get_size') result(res)
       import :: duckdb_vector, c_int64_t
       type(duckdb_vector), value :: vector
       integer(kind=c_int64_t) :: res
-    end function duckdb_list_vector_get_size
+    end function duckdb_list_vector_get_size_
 
     ! DUCKDB_API duckdb_state duckdb_list_vector_set_size(duckdb_vector vector, idx_t size);
-    function duckdb_list_vector_set_size(vector, size) bind(c, name='duckdb_list_vector_set_size') result(res)
+    function duckdb_list_vector_set_size_(vector, size) bind(c, name='duckdb_list_vector_set_size') result(res)
       import :: duckdb_vector, c_int64_t, duckdb_state
       type(duckdb_vector), value :: vector
       integer(kind=c_int64_t), value :: size
       integer(kind(duckdb_state)) :: res
-    end function duckdb_list_vector_set_size
+    end function duckdb_list_vector_set_size_
 
     ! DUCKDB_API duckdb_state duckdb_list_vector_reserve(duckdb_vector vector, idx_t required_capacity);
-    function duckdb_list_vector_reserve(vector, required_capacity) bind(c, name='duckdb_list_vector_reserve') result(res)
+    function duckdb_list_vector_reserve_(vector, required_capacity) bind(c, name='duckdb_list_vector_reserve') result(res)
       import :: duckdb_vector, c_int64_t, duckdb_state
       type(duckdb_vector), value :: vector
       integer(kind=c_int64_t), value :: required_capacity
       integer(kind(duckdb_state)) :: res
-    end function duckdb_list_vector_reserve
+    end function duckdb_list_vector_reserve_
 
     ! DUCKDB_API duckdb_vector duckdb_struct_vector_get_child(duckdb_vector vector, idx_t index);
     function duckdb_struct_vector_get_child(vector, index) bind(c, name='duckdb_struct_vector_get_child') result(res)
@@ -1435,31 +1507,35 @@ module duckdb
 
     ! DUCKDB_API bool duckdb_validity_row_is_valid(uint64_t *validity, idx_t row);
     function duckdb_validity_row_is_valid_(validity, row) bind(c, name='duckdb_validity_row_is_valid') result(res)
-      import :: c_bool, c_int64_t
-      integer(kind=c_int64_t) :: validity
+      import :: c_bool, c_int64_t, c_ptr
+      ! integer(kind=c_int64_t),  :: validity
+      type(c_ptr), value :: validity
       integer(kind=c_int64_t), value :: row
       logical(kind=c_bool) :: res
     end function duckdb_validity_row_is_valid_
 
     ! DUCKDB_API void duckdb_validity_set_row_validity(uint64_t *validity, idx_t row, bool valid);
     subroutine duckdb_validity_set_row_validity_(validity, row, valid) bind(c, name='duckdb_validity_set_row_validity')
-      import :: c_bool, c_int64_t
-      integer(kind=c_int64_t) :: validity
+      import :: c_bool, c_int64_t, c_ptr
+      ! integer(kind=c_int64_t) :: validity
+      type(c_ptr), value :: validity
       integer(kind=c_int64_t), value :: row
       logical(kind=c_bool), value :: valid
     end subroutine duckdb_validity_set_row_validity_
 
     ! DUCKDB_API void duckdb_validity_set_row_invalid(uint64_t *validity, idx_t row);
     subroutine duckdb_validity_set_row_invalid_(validity, row) bind(c, name='duckdb_validity_set_row_invalid')
-      import :: c_int64_t
-      integer(kind=c_int64_t) :: validity
+      import :: c_int64_t, c_ptr
+      ! integer(kind=c_int64_t) :: validity
+      type(c_ptr), value :: validity
       integer(kind=c_int64_t), value :: row
     end subroutine duckdb_validity_set_row_invalid_
 
     ! DUCKDB_API void duckdb_validity_set_row_valid(uint64_t *validity, idx_t row);
     subroutine duckdb_validity_set_row_valid_(validity, row) bind(c, name='duckdb_validity_set_row_valid')
-      import :: c_int64_t
-      integer(kind=c_int64_t) :: validity
+      import :: c_int64_t, c_ptr
+      ! integer(kind=c_int64_t) :: validity
+      type(c_ptr), value :: validity
       integer(kind=c_int64_t), value :: row
     end subroutine duckdb_validity_set_row_valid_
 
@@ -1742,7 +1818,7 @@ module duckdb
       import :: duckdb_state, duckdb_appender, c_ptr, c_int64_t
       integer(kind(duckdb_state)) :: res
       type(duckdb_appender), value :: appender
-      type(c_ptr) :: data
+      type(c_ptr), value :: data
       integer(kind=c_int64_t), value :: length
     end function duckdb_append_blob_
 
@@ -1766,10 +1842,29 @@ module duckdb
     ! =========================================================================
 
     ! DUCKDB_API duckdb_state duckdb_query_arrow(duckdb_connection connection, const char *query, duckdb_arrow *out_result);
+    function duckdb_query_arrow_(connection, query, out_result) bind(c, name='duckdb_query_arrow') result(res)
+      import :: duckdb_state, duckdb_connection, duckdb_arrow, c_char
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_connection), value :: connection
+      character(kind=c_char) :: query
+      type(duckdb_arrow) :: out_result
+    end function duckdb_query_arrow_
 
     ! DUCKDB_API duckdb_state duckdb_query_arrow_schema(duckdb_arrow result, duckdb_arrow_schema *out_schema);
+    function duckdb_query_arrow_schema(result, out_schema) bind(c, name='duckdb_query_arrow_schema') result(res)
+      import :: duckdb_state, duckdb_arrow, duckdb_arrow_schema
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_arrow), value :: result
+      type(duckdb_arrow_schema) :: out_schema
+    end function duckdb_query_arrow_schema
 
     ! DUCKDB_API duckdb_state duckdb_query_arrow_array(duckdb_arrow result, duckdb_arrow_array *out_array);
+    function duckdb_query_arrow_array(result, out_array) bind(c, name='duckdb_query_arrow_array') result(res)
+      import :: duckdb_state, duckdb_arrow, duckdb_arrow_array
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_arrow), value :: result
+      type(duckdb_arrow_array) :: out_array
+    end function duckdb_query_arrow_array
 
     ! DUCKDB_API idx_t duckdb_arrow_column_count(duckdb_arrow result);
 
@@ -1778,8 +1873,17 @@ module duckdb
     ! DUCKDB_API idx_t duckdb_arrow_rows_changed(duckdb_arrow result);
 
     ! DUCKDB_API const char *duckdb_query_arrow_error(duckdb_arrow result);
+    function duckdb_query_arrow_error_(result) bind(c, name='duckdb_query_arrow_error') result(err)
+      import :: c_ptr, duckdb_arrow
+      type(c_ptr) :: err
+      type(duckdb_arrow), value :: result
+    end function duckdb_query_arrow_error_
 
     ! DUCKDB_API void duckdb_destroy_arrow(duckdb_arrow *result);
+    subroutine duckdb_destroy_arrow(result) bind(c, name='duckdb_destroy_arrow')
+      import :: duckdb_arrow
+      type(duckdb_arrow) :: result
+    end subroutine duckdb_destroy_arrow
 
     ! =========================================================================
     ! Threading Information
@@ -1811,6 +1915,27 @@ module duckdb
     ! Open/Connect
     ! =========================================================================
 
+    function duckdb_open(path, out_database) result(res)
+      integer(kind(duckdb_state)) :: res
+      character(len=*) :: path
+      type(duckdb_database) :: out_database
+      res = duckdb_open_(path//c_null_char, out_database)
+    end function duckdb_open
+
+    function duckdb_open_ext(path, out_database, config, out_error) result(res)
+      integer(kind(duckdb_state)) :: res
+      character(len=*) :: path
+      type(duckdb_database) :: out_database
+      type(duckdb_config) :: config
+      type(c_ptr) :: tmp_error
+      character(len=:), allocatable :: out_error
+      tmp_error = c_null_ptr
+      res = duckdb_open_ext_(path//c_null_char, out_database, config, tmp_error)
+      if (c_associated(tmp_error)) then
+        call c_f_str_ptr(tmp_error, out_error)
+      endif
+    end function duckdb_open_ext
+
     function duckdb_library_version() result(res)
       character(len=:), allocatable :: res
       type(c_ptr) :: tmp
@@ -1826,6 +1951,28 @@ module duckdb
       integer :: res
       res = int(duckdb_config_count_())
     end function duckdb_config_count
+
+    function duckdb_get_config_flag(index, out_name, out_description) result(res)
+      integer(kind(duckdb_state)) :: res
+      integer :: index
+      type(c_ptr) :: tmp_name
+      type(c_ptr) :: tmp_description
+      character(len=:), allocatable :: out_name
+      character(len=:), allocatable :: out_description
+      out_name=""
+      out_description=""
+      res = duckdb_get_config_flag_(int(index, kind=c_size_t), tmp_name, tmp_description)
+      if (c_associated(tmp_name)) call c_f_str_ptr(tmp_name, out_name)
+      if (c_associated(tmp_description)) call c_f_str_ptr(tmp_description, out_description)
+    end function duckdb_get_config_flag
+
+    function duckdb_set_config(config, name, option) result(res)
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_config) :: config
+      character(len=*) :: name
+      character(len=*) :: option
+      res = duckdb_set_config_(config, name//c_null_char, option//c_null_char)
+    end function duckdb_set_config
 
     ! =========================================================================
     ! Query Execution
@@ -1913,7 +2060,7 @@ module duckdb
       character(len=:), allocatable :: err
       type(c_ptr) :: tmp
       type(duckdb_result) :: res
-      err = "NULL"
+      err = ""
       if (c_associated(res%internal_data)) then
         tmp = duckdb_result_error_(res)
         if (c_associated(tmp)) call c_f_str_ptr(tmp, err)
@@ -1991,7 +2138,7 @@ module duckdb
       type(duckdb_hugeint) :: r
       r = duckdb_hugeint()
       if (c_associated(res%internal_data)) &
-        r = duckdb_value_hugeint_(res, int(col, kind=c_int64_t), int(col, kind=c_int64_t))
+        r = duckdb_value_hugeint_(res, int(col, kind=c_int64_t), int(row, kind=c_int64_t))
     end function duckdb_value_hugeint
 
     function duckdb_value_decimal(res, col, row)  result(r)
@@ -1999,7 +2146,7 @@ module duckdb
       integer :: col, row
       type(duckdb_decimal) :: r
       if (c_associated(res%internal_data)) &
-        r = duckdb_value_decimal_(res, int(col, kind=c_int64_t), int(col, kind=c_int64_t))
+        r = duckdb_value_decimal_(res, int(col, kind=c_int64_t), int(row, kind=c_int64_t))
     end function duckdb_value_decimal
 
     function duckdb_value_float(res, col, row) result(r)
@@ -2103,8 +2250,16 @@ module duckdb
       logical :: r
       r = .false.
       if (c_associated(res%internal_data)) &
-        r = duckdb_value_is_null_(res, int(col, kind=c_int64_t), int(row, kind=c_int64_t))
+        r = logical(duckdb_value_is_null_(res, int(col, kind=c_int64_t), int(row, kind=c_int64_t)))
     end function duckdb_value_is_null
+
+    function duckdb_string_to_character(str) result(res)
+      type(duckdb_string) :: str
+      character(len=:), allocatable :: res
+      res = ""
+      if (c_associated(str%data)) &
+        call c_f_str_ptr(str%data, res)
+    end function duckdb_string_to_character
 
     ! =========================================================================
     ! Helpers
@@ -2154,19 +2309,19 @@ module duckdb
 
     function duckdb_prepare(connection, query, out_prepared_statement) result(res)
       integer(kind(duckdb_state)) :: res
-      type(duckdb_connection), value :: connection
+      type(duckdb_connection) :: connection
       character(len=*) :: query
       character(len=:), allocatable :: sql
       type(duckdb_prepared_statement) :: out_prepared_statement
-      sql = query // c_null_char ! convert to c string
-      res = duckdb_prepare_(connection, sql, out_prepared_statement)
+      ! sql = query // c_null_char ! convert to c string
+      res = duckdb_prepare_(connection, query//c_null_char, out_prepared_statement)
     end function duckdb_prepare
 
     function duckdb_prepare_error(ps) result(err)
       character(len=:), allocatable :: err
       type(c_ptr) :: tmp
       type(duckdb_prepared_statement) :: ps
-      err = "NULL"
+      err = ""
       if (c_associated(ps%prep)) then
         tmp = duckdb_prepare_error_(ps)
         if (c_associated(tmp)) call c_f_str_ptr(tmp, err)
@@ -2192,6 +2347,7 @@ module duckdb
       type(duckdb_prepared_statement) :: ps
       integer :: idx
       logical :: val
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_boolean_(ps, int(idx, kind=c_int64_t), logical(val, kind=c_bool))
     end function duckdb_bind_boolean
@@ -2201,6 +2357,7 @@ module duckdb
       type(duckdb_prepared_statement) :: ps
       integer :: idx
       integer(kind=int8) :: val
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_int8_(ps, int(idx, kind=c_int64_t), int(val, kind=c_int8_t))
     end function duckdb_bind_int8
@@ -2210,6 +2367,7 @@ module duckdb
       type(duckdb_prepared_statement) :: ps
       integer :: idx
       integer(kind=int16) :: val
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_int16_(ps, int(idx, kind=c_int64_t), int(val, kind=c_int16_t))
     end function duckdb_bind_int16
@@ -2219,6 +2377,7 @@ module duckdb
       type(duckdb_prepared_statement) :: ps
       integer :: idx
       integer(kind=int32) :: val
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_int32_(ps, int(idx, kind=c_int64_t), int(val, kind=c_int32_t))
     end function duckdb_bind_int32
@@ -2228,6 +2387,7 @@ module duckdb
       type(duckdb_prepared_statement) :: ps
       integer :: idx
       integer(kind=int64) :: val
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_int64_(ps, int(idx, kind=c_int64_t), int(val, kind=c_int64_t))
     end function duckdb_bind_int64
@@ -2237,6 +2397,7 @@ module duckdb
       type(duckdb_prepared_statement) :: ps
       integer :: idx
       type(duckdb_hugeint) :: val
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_hugeint_(ps, int(idx, kind=c_int64_t), val)
     end function duckdb_bind_hugeint
@@ -2246,6 +2407,7 @@ module duckdb
       type(duckdb_prepared_statement) :: ps
       integer :: idx
       type(duckdb_decimal) :: val
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_decimal_(ps, int(idx, kind=c_int64_t), val)
     end function duckdb_bind_decimal
@@ -2255,6 +2417,7 @@ module duckdb
       type(duckdb_prepared_statement) :: ps
       integer :: idx
       real(kind=real32) :: val
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_float_(ps, int(idx, kind=c_int64_t), real(val, kind=c_float))
     end function duckdb_bind_float
@@ -2264,6 +2427,7 @@ module duckdb
       type(duckdb_prepared_statement) :: ps
       integer :: idx
       real(kind=real64) :: val
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_double_(ps, int(idx, kind=c_int64_t), real(val, kind=c_double))
     end function duckdb_bind_double
@@ -2273,6 +2437,7 @@ module duckdb
       type(duckdb_prepared_statement) :: ps
       integer :: idx
       type(duckdb_date) :: val
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_date_(ps, int(idx, kind=c_int64_t), val)
     end function duckdb_bind_date
@@ -2282,6 +2447,7 @@ module duckdb
       type(duckdb_prepared_statement) :: ps
       integer :: idx
       type(duckdb_time) :: val
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_time_(ps, int(idx, kind=c_int64_t), val)
     end function duckdb_bind_time
@@ -2291,6 +2457,7 @@ module duckdb
       type(duckdb_prepared_statement) :: ps
       integer :: idx
       type(duckdb_timestamp) :: val
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_timestamp_(ps, int(idx, kind=c_int64_t), val)
     end function duckdb_bind_timestamp
@@ -2300,6 +2467,7 @@ module duckdb
       type(duckdb_prepared_statement) :: ps
       integer :: idx
       type(duckdb_interval) :: val
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_interval_(ps, int(idx, kind=c_int64_t), val)
     end function duckdb_bind_interval
@@ -2311,6 +2479,7 @@ module duckdb
       character(len=*) :: val
       character(len=:), allocatable :: cval
       cval = val // c_null_char ! convert to c string
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_varchar_(ps, int(idx, kind=c_int64_t), cval)
     end function duckdb_bind_varchar
@@ -2322,6 +2491,7 @@ module duckdb
       character(len=*) :: val
       character(len=:), allocatable :: cval
       cval = val // c_null_char ! convert to c string
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_varchar_length_(ps, int(idx, kind=c_int64_t), cval, int(length, kind=c_int64_t))
     end function duckdb_bind_varchar_length
@@ -2342,16 +2512,42 @@ module duckdb
       integer(kind(duckdb_state)) :: res
       type(duckdb_prepared_statement) :: ps
       integer :: idx
+      res = duckdberror
       if (c_associated(ps%prep)) &
         res = duckdb_bind_null_(ps, int(idx, kind=c_int64_t))
     end function duckdb_bind_null
 
-
-
-
     ! =========================================================================
     ! Extract Statements
     ! =========================================================================
+    function duckdb_extract_statements(connection, query, out_extracted_statements) result(res)
+      type(duckdb_connection) :: connection
+      character(len=*) :: query
+      type(duckdb_extracted_statements) :: out_extracted_statements
+      integer :: res
+      res = int(duckdb_extract_statements_(connection, query//c_null_char, out_extracted_statements))
+    end function duckdb_extract_statements
+
+    function duckdb_prepare_extracted_statement(connection, extracted_statements, index, out_prepared_statement) result(res)
+      type(duckdb_connection) :: connection
+      type(duckdb_extracted_statements) :: extracted_statements
+      type(duckdb_prepared_statement) :: out_prepared_statement
+      integer(kind=int64) :: index
+      integer(kind(duckdb_state)) :: res
+      res = duckdb_prepare_extracted_statement_(connection, extracted_statements, &
+        int(index, c_int64_t), out_prepared_statement)
+    end function duckdb_prepare_extracted_statement
+
+    function duckdb_extract_statements_error(extracted_statements) result(err)
+      character(len=:), allocatable :: err
+      type(c_ptr) :: tmp
+      type(duckdb_extracted_statements) :: extracted_statements
+      err = ""
+      if (c_associated(extracted_statements%extrac)) then
+        tmp = duckdb_extract_statements_error_(extracted_statements)
+        if (c_associated(tmp)) call c_f_str_ptr(tmp, err)
+      end if  
+    end function duckdb_extract_statements_error
 
     ! =========================================================================
     ! Pending Result Interface
@@ -2447,14 +2643,15 @@ module duckdb
     ! Vector Interface
     ! =========================================================================
 
-    function duckdb_vector_get_validity(vector) result(res)
-      type(duckdb_vector) :: vector
-      type(c_ptr) :: ptr
-      integer(kind=int64), pointer :: res
-      ptr = duckdb_vector_get_validity_(vector)
-      call c_f_pointer(ptr, res)
-      ! res = int(duckdb_vector_get_validity_(vector), kind=int64)
-    end function duckdb_vector_get_validity
+    ! TEST - forego the helper for now, test returning a c_ptr instead
+    ! function duckdb_vector_get_validity(vector) result(res)
+    !   type(duckdb_vector) :: vector
+    !   type(c_ptr) :: ptr
+    !   integer(kind=int64), pointer :: res
+    !   ptr = duckdb_vector_get_validity_(vector)
+    !   call c_f_pointer(ptr, res)
+    !   ! res = int(duckdb_vector_get_validity_(vector), kind=int64)
+    ! end function duckdb_vector_get_validity
 
     subroutine duckdb_vector_assign_string_element(vector, index, str)
       type(duckdb_vector) :: vector
@@ -2472,46 +2669,74 @@ module duckdb
         str // c_null_char, int(str_len, kind=c_int64_t))
     end subroutine duckdb_vector_assign_string_element_len
 
+    function duckdb_list_vector_reserve(vector, required_capacity) result(res)
+      type(duckdb_vector) :: vector
+      integer(kind=int64) :: required_capacity
+      integer(kind(duckdb_state)) :: res
+      res = duckdb_list_vector_reserve_(vector, int(required_capacity, kind=c_int64_t))
+    end function duckdb_list_vector_reserve
+
+    function duckdb_list_vector_get_size(vector) result(res)
+      type(duckdb_vector), value :: vector
+      integer(kind=int64) :: res
+      res = int(duckdb_list_vector_get_size_(vector), kind=int64)
+    end function duckdb_list_vector_get_size
+
+    function duckdb_list_vector_set_size(vector, size) result(res)
+      type(duckdb_vector) :: vector
+      integer(kind=int64) :: size
+      integer(kind(duckdb_state)) :: res
+      res = duckdb_list_vector_set_size_(vector, int(size, kind=c_int64_t))
+    end function duckdb_list_vector_set_size
+
     ! =========================================================================
     ! Validity Mask Functions
     ! =========================================================================
 
     function duckdb_validity_row_is_valid(validity, row) result(res)
-      integer(kind=int64) :: validity
+      ! integer(kind=int64) :: validity
+      type(c_ptr) :: validity
       integer :: row
       logical :: res
-      integer(kind=c_int64_t) :: tmp
-      tmp = int(validity, kind=c_int64_t)
-      res = duckdb_validity_row_is_valid_(tmp, int(row, kind=c_int64_t))
-      validity = int(tmp, kind=int64)
+      ! integer(kind=c_int64_t) :: tmp
+      ! tmp = int(validity, kind=c_int64_t)
+      ! res = duckdb_validity_row_is_valid_(tmp, int(row, kind=c_int64_t))
+      res = duckdb_validity_row_is_valid_(validity, int(row, kind=c_int64_t))
+      ! validity = int(tmp, kind=int64)
     end function duckdb_validity_row_is_valid
 
     subroutine duckdb_validity_set_row_validity(validity, row, valid)
-      integer(kind=int64) :: validity
+      ! integer(kind=int64) :: validity
+      type(c_ptr) :: validity
       integer :: row
       logical :: valid
-      integer(kind=c_int64_t) :: tmp
-      tmp = int(validity, kind=c_int64_t)
-      call duckdb_validity_set_row_validity_(tmp, int(row, kind=c_int64_t), logical(valid, kind=c_bool))
-      validity = int(tmp, kind=int64)
+      ! integer(kind=c_int64_t) :: tmp
+      ! tmp = int(validity, kind=c_int64_t)
+      ! call duckdb_validity_set_row_validity_(tmp, int(row, kind=c_int64_t), logical(valid, kind=c_bool))
+      call duckdb_validity_set_row_validity_(validity, int(row, kind=c_int64_t), logical(valid, kind=c_bool))
+      ! validity = int(tmp, kind=int64)
     end subroutine duckdb_validity_set_row_validity
 
     subroutine duckdb_validity_set_row_invalid(validity, row)
-      integer(kind=int64) :: validity
+      ! integer(kind=int64) :: validity
+      type(c_ptr) :: validity
       integer :: row
-      integer(kind=c_int64_t) :: tmp
-      tmp = int(validity, kind=c_int64_t)
-      call duckdb_validity_set_row_invalid_(tmp, int(row, kind=c_int64_t))
-      validity = int(tmp, kind=int64)
+      ! integer(kind=c_int64_t) :: tmp
+      ! tmp = int(validity, kind=c_int64_t)
+      ! call duckdb_validity_set_row_invalid_(tmp, int(row, kind=c_int64_t))
+      call duckdb_validity_set_row_invalid_(validity, int(row, kind=c_int64_t))
+      ! validity = int(tmp, kind=int64)
     end subroutine duckdb_validity_set_row_invalid
 
     subroutine duckdb_validity_set_row_valid(validity, row)
-      integer(kind=int64) :: validity
+      ! integer(kind=int64) :: validity
+      type(c_ptr) :: validity
       integer :: row
-      integer(kind=c_int64_t) :: tmp
-      tmp = int(validity, kind=c_int64_t)
-      call duckdb_validity_set_row_invalid_(tmp, int(row, kind=c_int64_t))
-      validity = int(tmp, kind=int64)
+      ! integer(kind=c_int64_t) :: tmp
+      ! tmp = int(validity, kind=c_int64_t)
+      ! call duckdb_validity_set_row_invalid_(tmp, int(row, kind=c_int64_t))
+      call duckdb_validity_set_row_invalid_(validity, int(row, kind=c_int64_t))
+      ! validity = int(tmp, kind=int64)
     end subroutine duckdb_validity_set_row_valid
 
     ! =========================================================================
@@ -2552,7 +2777,7 @@ module duckdb
       character(len=:), allocatable :: err
       type(c_ptr) :: tmp
       type(duckdb_appender) :: appender
-      err = "NULL"
+      err = ""
       if (c_associated(appender%appn)) then
         tmp = duckdb_appender_error_(appender)
         if (c_associated(tmp)) call c_f_str_ptr(tmp, err)
@@ -2614,6 +2839,7 @@ module duckdb
       character(len=*) :: val
       character(len=:), allocatable :: cval
       cval = val // c_null_char ! convert to c string
+      res = duckdberror
       if (c_associated(appender%appn)) &
         res = duckdb_append_varchar_(appender, cval)
     end function duckdb_append_varchar
@@ -2624,9 +2850,29 @@ module duckdb
       type(duckdb_blob) :: blob
       res = duckdb_append_blob_(appender, blob%data, blob%size)
     end function duckdb_append_blob
+
     ! =========================================================================
     ! Arrow Interface
     ! =========================================================================
+
+    function duckdb_query_arrow(connection, query, out_result) result(res)
+      integer(kind(duckdb_state)) :: res
+      type(duckdb_connection), value :: connection
+      character(len=*) :: query
+      type(duckdb_arrow) :: out_result
+      res = duckdb_query_arrow_(connection, query//c_null_char, out_result)
+    end function duckdb_query_arrow
+
+    function duckdb_query_arrow_error(res) result(err)
+      character(len=:), allocatable :: err
+      type(c_ptr) :: tmp
+      type(duckdb_arrow) :: res
+      err = "NULL"
+      if (c_associated(res%arrw)) then
+        tmp = duckdb_query_arrow_error_(res)
+        if (c_associated(tmp)) call c_f_str_ptr(tmp, err)
+      end if
+    end function duckdb_query_arrow_error
 
     ! =========================================================================
     ! Threading Information
